@@ -1,0 +1,80 @@
+name: Package RimWorld Mod
+
+on:
+  workflow_call:
+    inputs:
+      tag-name:
+        description: 'The tag for naming the package (e.g. v1.2.3)'
+        required: true
+        type: string
+      exclude-patterns:
+        description: 'Additional rsync exclude patterns (space-separated)'
+        required: false
+        type: string
+        default: ''
+    outputs:
+      artifact-name:
+        description: 'Name of the uploaded artifact containing the zip'
+        value: mod-package
+      zip-filename:
+        description: 'Filename of the generated zip'
+        value: ${{ inputs.tag-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package Mod
+    runs-on: ubuntu-latest
+    outputs:
+      mod-safe: ${{ steps.package.outputs.mod_safe }}
+    steps:
+      - name: Checkout Caller Repo
+        uses: actions/checkout@v4
+
+      - name: Package Mod
+        id: package
+        run: |
+          TAG="${{ inputs.tag-name }}"
+          if [ -f "About/About.xml" ]; then
+            MOD_NAME=$(grep -oP '(?<=<name>)[^<]+' About/About.xml | head -1)
+            MOD_SAFE=$(echo "$MOD_NAME" | sed 's/[^a-zA-Z0-9 ]//g' | sed 's/ /-/g' | sed 's/-\+/-/g')
+          else
+            MOD_SAFE="${{ github.event.repository.name }}"
+          fi
+          [ -z "$MOD_SAFE" ] && MOD_SAFE="mod"
+          echo "mod_safe=$MOD_SAFE" >> $GITHUB_OUTPUT
+          EXTRA_EXCLUDES=""
+          if [ -n "${{ inputs.exclude-patterns }}" ]; then
+            for pattern in ${{ inputs.exclude-patterns }}; do
+              EXTRA_EXCLUDES="$EXTRA_EXCLUDES --exclude='$pattern'"
+            done
+          fi
+          mkdir -p "/tmp/${MOD_SAFE}"
+          rsync -av --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='Source/' \
+            --exclude='Tests/' \
+            --exclude='.claude/' \
+            --exclude='.trae/' \
+            --exclude='docs/' \
+            --exclude='*.csproj' \
+            --exclude='*.sln' \
+            --exclude='.gitignore' \
+            --exclude='.gitattributes' \
+            --exclude='*.md' \
+            --exclude='.shared-workflows/' \
+            $EXTRA_EXCLUDES \
+            "./" "/tmp/${MOD_SAFE}/"
+          cd /tmp
+          zip -r "${MOD_SAFE}-${TAG}.zip" "${MOD_SAFE}/"
+          echo "::notice::打包完成: ${MOD_SAFE}-${TAG}.zip"
+
+      - name: Upload Mod Package
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-package
+          path: /tmp/${{ steps.package.outputs.mod_safe }}-${{ inputs.tag-name }}.zip
+          retention-days: 1
