@@ -8,16 +8,6 @@ on:
         description: 'The tag that triggered the release (e.g. v1.2.3)'
         required: true
         type: string
-      deepseek-base-url:
-        description: 'DeepSeek API base URL'
-        required: false
-        type: string
-        default: 'https://api.deepseek.com'
-      deepseek-model:
-        description: 'DeepSeek model name'
-        required: false
-        type: string
-        default: 'deepseek-chat'
       exclude-patterns:
         description: 'Additional rsync exclude patterns (space-separated)'
         required: false
@@ -27,7 +17,9 @@ on:
       DEEPSEEK_API_KEY:
         required: true
       DEEPSEEK_BASE_URL:
-        required: false
+        required: true
+      DEEPSEEK_MODEL:
+        required: true
 
 permissions:
   contents: write
@@ -39,11 +31,10 @@ jobs:
     uses: ./.github/workflows/ai-release-notes.yml
     with:
       tag-name: ${{ inputs.tag-name }}
-      deepseek-base-url: ${{ inputs.deepseek-base-url }}
-      deepseek-model: ${{ inputs.deepseek-model }}
     secrets:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+      DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
 
   package-mod:
     name: Package Mod

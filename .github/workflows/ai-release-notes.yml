@@ -7,21 +7,13 @@ on:
         description: 'The tag that triggered the release (e.g. v1.2.3)'
         required: true
         type: string
-      deepseek-base-url:
-        description: 'DeepSeek API base URL'
-        required: false
-        type: string
-        default: 'https://api.deepseek.com'
-      deepseek-model:
-        description: 'DeepSeek model name'
-        required: false
-        type: string
-        default: 'deepseek-chat'
     secrets:
       DEEPSEEK_API_KEY:
         required: true
       DEEPSEEK_BASE_URL:
-        required: false
+        required: true
+      DEEPSEEK_MODEL:
+        required: true
     outputs:
       release-notes-path:
         description: 'Path to the generated release notes markdown file'
@@ -136,8 +128,8 @@ jobs:
       - name: Generate AI Release Notes
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL || inputs.deepseek-base-url }}
-          DEEPSEEK_MODEL: ${{ inputs.deepseek-model }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
         run: |
           python .shared-workflows/scripts/analyze_release.py \
             --tag "${{ steps.git-range.outputs.current }}" \

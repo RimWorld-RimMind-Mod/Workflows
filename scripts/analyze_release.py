@@ -69,8 +69,12 @@ def call_deepseek(prompt: str) -> tuple:
     if not api_key:
         raise AuthenticationError("DEEPSEEK_API_KEY 环境变量未设置")
 
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+    base_url = os.environ.get("DEEPSEEK_BASE_URL")
+    model = os.environ.get("DEEPSEEK_MODEL")
+    if not base_url:
+        raise ValueError("DEEPSEEK_BASE_URL 环境变量未设置")
+    if not model:
+        raise ValueError("DEEPSEEK_MODEL 环境变量未设置")
     client = OpenAI(api_key=api_key, base_url=base_url, timeout=60)
 
     max_retries = 3
