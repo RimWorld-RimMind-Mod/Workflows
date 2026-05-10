@@ -28,8 +28,6 @@ on:
         required: true
       DEEPSEEK_BASE_URL:
         required: false
-      GITHUB_TOKEN:
-        required: true
 
 permissions:
   contents: write
@@ -205,4 +203,4 @@ jobs:
           files: /tmp/${{ steps.package.outputs.mod_safe }}-${{ steps.git-range.outputs.current }}.zip
           generate_release_notes: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
