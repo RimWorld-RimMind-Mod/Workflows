@@ -1,0 +1,131 @@
+name: Reusable Test
+
+on:
+  workflow_call:
+    inputs:
+      dotnet-version:
+        description: .NET SDK version
+        required: false
+        type: string
+        default: '10.0.x'
+      test-dir:
+        description: Directory containing unit test project
+        required: false
+        type: string
+        default: 'Tests'
+      arch-test-dir:
+        description: Directory containing architecture test project
+        required: false
+        type: string
+        default: 'ArchTests'
+      arch-phases:
+        description: Comma-separated list of arch-test phases to run (A,B,C,D,E,Full)
+        required: false
+        type: string
+        default: 'A,B,C,D,E,Full'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Tests directory
+        id: check_tests
+        run: |
+          if [ -d "${{ inputs.test-dir }}" ]; then
+            csproj=$(find ${{ inputs.test-dir }} -maxdepth 1 -name '*.Tests.csproj' -print -quit 2>/dev/null)
+            if [ -n "$csproj" ]; then
+              echo "has_tests=true" >> $GITHUB_OUTPUT
+              echo "csproj=$(basename $csproj)" >> $GITHUB_OUTPUT
+            else
+              echo "has_tests=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_tests=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup .NET
+        if: steps.check_tests.outputs.has_tests == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Restore dependencies
+        if: steps.check_tests.outputs.has_tests == 'true'
+        run: dotnet restore ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }}
+
+      - name: Build
+        if: steps.check_tests.outputs.has_tests == 'true'
+        run: dotnet build ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }} --no-restore -c Release
+
+      - name: Test
+        if: steps.check_tests.outputs.has_tests == 'true'
+        run: dotnet test ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }} --no-build -c Release --verbosity normal
+
+  arch-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [A, B, C, D, E, Full]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if phase is enabled
+        id: phase-check
+        run: |
+          PHASES="${{ inputs.arch-phases }}"
+          if echo "$PHASES" | grep -qw "${{ matrix.phase }}"; then
+            echo "enabled=true" >> $GITHUB_OUTPUT
+          else
+            echo "enabled=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check ArchTests directory
+        if: steps.phase-check.outputs.enabled == 'true'
+        id: check_arch
+        run: |
+          if [ -d "${{ inputs.arch-test-dir }}" ]; then
+            csproj=$(find ${{ inputs.arch-test-dir }} -maxdepth 1 -name '*.ArchTests.csproj' -print -quit 2>/dev/null)
+            if [ -n "$csproj" ]; then
+              echo "has_arch=true" >> $GITHUB_OUTPUT
+              echo "csproj=$(basename $csproj)" >> $GITHUB_OUTPUT
+            else
+              echo "has_arch=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_arch=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup .NET
+        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Restore dependencies
+        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
+        run: dotnet restore ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }}
+
+      - name: Build ArchTests
+        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
+        run: dotnet build ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-restore -c Release
+
+      - name: Run ArchTests Phase ${{ matrix.phase }}
+        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
+        run: |
+          FILTER=""
+          case "${{ matrix.phase }}" in
+            A) FILTER="Phase=A|Phase=General" ;;
+            B) FILTER="Phase=A|Phase=B|Phase=General" ;;
+            C) FILTER="Phase=A|Phase=B|Phase=C|Phase=General" ;;
+            D) FILTER="Phase=A|Phase=B|Phase=C|Phase=D|Phase=General" ;;
+            E) FILTER="Phase=A|Phase=B|Phase=C|Phase=D|Phase=E|Phase=General" ;;
+            Full) FILTER="" ;;
+          esac
+          if [ -n "$FILTER" ]; then
+            dotnet test ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-build -c Release --filter "$FILTER" --verbosity normal
+          else
+            dotnet test ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-build -c Release --verbosity normal
+          fi
