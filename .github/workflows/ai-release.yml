@@ -1,0 +1,63 @@
+name: AI Release
+
+on:
+  workflow_call:
+    inputs:
+      tag-name:
+        description: 'The tag that triggered the release (e.g. v1.2.3)'
+        required: true
+        type: string
+    secrets:
+      DEEPSEEK_API_KEY:
+        required: true
+      DEEPSEEK_BASE_URL:
+        required: true
+      DEEPSEEK_MODEL:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  generate-notes:
+    name: AI Release Notes
+    uses: ./.github/workflows/ai-release-notes.yml
+    with:
+      tag-name: ${{ inputs.tag-name }}
+    secrets:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+      DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [generate-notes]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Release Notes
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+          path: /tmp
+
+      - name: Check Prerelease
+        id: prerelease
+        run: |
+          TAG="${{ inputs.tag-name }}"
+          if echo "$TAG" | grep -qiE 'alpha|beta|rc|preview|test|dev|snapshot|nightly'; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag-name }}
+          name: Release ${{ inputs.tag-name }}
+          body_path: /tmp/release_notes.md
+          prerelease: ${{ steps.prerelease.outputs.is_prerelease == 'true' }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
