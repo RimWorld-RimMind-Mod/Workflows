@@ -28,7 +28,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check Tests directory
         id: check_tests
@@ -70,7 +70,7 @@ jobs:
       matrix:
         phase: [A, B, C, D, E, Full]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check if phase is enabled
         id: phase-check
