@@ -31,7 +31,7 @@ jobs:
       mod-safe: ${{ steps.package.outputs.mod_safe }}
     steps:
       - name: Checkout Caller Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Package Mod
         id: package

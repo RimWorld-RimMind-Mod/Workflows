@@ -31,12 +31,12 @@ jobs:
       release-notes-path: /tmp/release_notes.md
     steps:
       - name: Checkout Caller Repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Checkout Shared Workflows
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RimWorld-RimMind-Mod/Workflows
           path: .shared-workflows
