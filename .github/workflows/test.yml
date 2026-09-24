@@ -47,7 +47,7 @@ jobs:
 
       - name: Setup .NET
         if: steps.check_tests.outputs.has_tests == 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
@@ -100,7 +100,7 @@ jobs:
 
       - name: Setup .NET
         if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
