@@ -73,7 +73,7 @@ jobs:
           echo "::notice::打包完成: ${MOD_SAFE}-${TAG}.zip"
 
       - name: Upload Mod Package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mod-package
           path: /tmp/${{ steps.package.outputs.mod_safe }}-${{ inputs.tag-name }}.zip
