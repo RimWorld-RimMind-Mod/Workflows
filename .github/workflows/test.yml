@@ -51,6 +51,25 @@ jobs:
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
+      - name: Prepare Core & Build Dependencies (1.6 & 1.7)
+        if: steps.check_tests.outputs.has_tests == 'true'
+        run: |
+          if [ "${{ github.event.repository.name }}" != "RimWorld-RimMind-Mod-Core" ] && [ "${{ github.event.repository.name }}" != "RimMind-Core" ] && [ ! -d "../RimMind-Core" ]; then
+            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Core.git ../RimMind-Core
+            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.6
+            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.7
+          fi
+          if ( [ "${{ github.event.repository.name }}" = "RimWorld-RimMind-Mod-Advisor" ] || [ "${{ github.event.repository.name }}" = "RimMind-Advisor" ] ) && [ ! -d "../RimMind-Actions" ]; then
+            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Actions.git ../RimMind-Actions
+            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.6
+            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.7
+          fi
+          src_csproj=$(find Source -maxdepth 1 -name '*.csproj' -print -quit 2>/dev/null || true)
+          if [ -n "$src_csproj" ]; then
+            dotnet build "$src_csproj" -c Release -p:GameVersion=1.6
+            dotnet build "$src_csproj" -c Release -p:GameVersion=1.7
+          fi
+
       - name: Restore dependencies
         if: steps.check_tests.outputs.has_tests == 'true'
         run: dotnet restore ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }}
@@ -103,6 +122,20 @@ jobs:
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Prepare Core & Build Dependencies (1.6 & 1.7)
+        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
+        run: |
+          if [ "${{ github.event.repository.name }}" != "RimWorld-RimMind-Mod-Core" ] && [ "${{ github.event.repository.name }}" != "RimMind-Core" ] && [ ! -d "../RimMind-Core" ]; then
+            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Core.git ../RimMind-Core
+            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.6
+            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.7
+          fi
+          if ( [ "${{ github.event.repository.name }}" = "RimWorld-RimMind-Mod-Advisor" ] || [ "${{ github.event.repository.name }}" = "RimMind-Advisor" ] ) && [ ! -d "../RimMind-Actions" ]; then
+            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Actions.git ../RimMind-Actions
+            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.6
+            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.7
+          fi
 
       - name: Restore dependencies
         if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
