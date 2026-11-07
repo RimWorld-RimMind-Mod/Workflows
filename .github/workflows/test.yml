@@ -30,6 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Normalize Workspace Directory Alias
+        run: |
+          MOD_SHORT=$(echo "${{ github.event.repository.name }}" | sed 's/^RimWorld-RimMind-Mod-/RimMind-/')
+          if [ ! -e "../$MOD_SHORT" ]; then
+            ln -s "$GITHUB_WORKSPACE" "../$MOD_SHORT"
+          fi
+
       - name: Discover Test Projects
         id: check_tests
         run: |
