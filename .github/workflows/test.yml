@@ -19,10 +19,10 @@ on:
         type: string
         default: 'ArchTests'
       arch-phases:
-        description: Comma-separated list of arch-test phases to run (A,B,C,D,E,Full)
+        description: Comma-separated list of arch-test phases to run (A,B,C,D,E,N,Full)
         required: false
         type: string
-        default: 'A,B,C,D,E,Full'
+        default: 'Full'
 
 jobs:
   test:
@@ -30,14 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check Tests directory
+      - name: Discover Test Projects
         id: check_tests
         run: |
           if [ -d "${{ inputs.test-dir }}" ]; then
-            csproj=$(find ${{ inputs.test-dir }} -maxdepth 1 -name '*.Tests.csproj' -print -quit 2>/dev/null)
+            csproj=$(find "${{ inputs.test-dir }}" -maxdepth 1 -name '*.Tests.csproj' -print -quit 2>/dev/null)
             if [ -n "$csproj" ]; then
               echo "has_tests=true" >> $GITHUB_OUTPUT
-              echo "csproj=$(basename $csproj)" >> $GITHUB_OUTPUT
+              echo "csproj=$(basename "$csproj")" >> $GITHUB_OUTPUT
             else
               echo "has_tests=false" >> $GITHUB_OUTPUT
             fi
@@ -45,14 +45,38 @@ jobs:
             echo "has_tests=false" >> $GITHUB_OUTPUT
           fi
 
+          if [ -d "IntegrationTests" ]; then
+            int_csproj=$(find IntegrationTests -maxdepth 1 -name '*.Tests.csproj' -print -quit 2>/dev/null)
+            if [ -n "$int_csproj" ]; then
+              echo "has_integration=true" >> $GITHUB_OUTPUT
+              echo "int_csproj=$(basename "$int_csproj")" >> $GITHUB_OUTPUT
+            else
+              echo "has_integration=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_integration=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -d "${{ inputs.arch-test-dir }}" ]; then
+            arch_csproj=$(find "${{ inputs.arch-test-dir }}" -maxdepth 1 -name '*.ArchTests.csproj' -print -quit 2>/dev/null)
+            if [ -n "$arch_csproj" ]; then
+              echo "has_arch=true" >> $GITHUB_OUTPUT
+              echo "arch_csproj=$(basename "$arch_csproj")" >> $GITHUB_OUTPUT
+            else
+              echo "has_arch=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_arch=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Setup .NET
-        if: steps.check_tests.outputs.has_tests == 'true'
+        if: steps.check_tests.outputs.has_tests == 'true' || steps.check_tests.outputs.has_integration == 'true' || steps.check_tests.outputs.has_arch == 'true'
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
 
       - name: Prepare Core & Build Dependencies (1.6 & 1.7)
-        if: steps.check_tests.outputs.has_tests == 'true'
+        if: steps.check_tests.outputs.has_tests == 'true' || steps.check_tests.outputs.has_integration == 'true' || steps.check_tests.outputs.has_arch == 'true'
         run: |
           if [ "${{ github.event.repository.name }}" != "RimWorld-RimMind-Mod-Core" ] && [ "${{ github.event.repository.name }}" != "RimMind-Core" ] && [ ! -d "../RimMind-Core" ]; then
             git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Core.git ../RimMind-Core
@@ -70,95 +94,20 @@ jobs:
             dotnet build "$src_csproj" -c Release -p:GameVersion=1.7
           fi
 
-      - name: Restore dependencies
+      - name: Restore & Build Unit Tests
         if: steps.check_tests.outputs.has_tests == 'true'
-        run: dotnet restore ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }}
+        run: |
+          dotnet restore ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }}
+          dotnet build ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }} --no-restore -c Release
 
-      - name: Build
-        if: steps.check_tests.outputs.has_tests == 'true'
-        run: dotnet build ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }} --no-restore -c Release
-
-      - name: Test
+      - name: Run Unit Tests
         if: steps.check_tests.outputs.has_tests == 'true'
         run: dotnet test ${{ inputs.test-dir }}/${{ steps.check_tests.outputs.csproj }} --no-build -c Release --verbosity normal
 
-  arch-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        phase: [A, B, C, D, E, Full]
-    steps:
-      - uses: actions/checkout@v7
+      - name: Run Integration Tests
+        if: steps.check_tests.outputs.has_integration == 'true'
+        run: dotnet test IntegrationTests/${{ steps.check_tests.outputs.int_csproj }} -c Release --verbosity normal
 
-      - name: Check if phase is enabled
-        id: phase-check
-        run: |
-          PHASES="${{ inputs.arch-phases }}"
-          if echo "$PHASES" | grep -qw "${{ matrix.phase }}"; then
-            echo "enabled=true" >> $GITHUB_OUTPUT
-          else
-            echo "enabled=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Check ArchTests directory
-        if: steps.phase-check.outputs.enabled == 'true'
-        id: check_arch
-        run: |
-          if [ -d "${{ inputs.arch-test-dir }}" ]; then
-            csproj=$(find ${{ inputs.arch-test-dir }} -maxdepth 1 -name '*.ArchTests.csproj' -print -quit 2>/dev/null)
-            if [ -n "$csproj" ]; then
-              echo "has_arch=true" >> $GITHUB_OUTPUT
-              echo "csproj=$(basename $csproj)" >> $GITHUB_OUTPUT
-            else
-              echo "has_arch=false" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "has_arch=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Setup .NET
-        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: ${{ inputs.dotnet-version }}
-
-      - name: Prepare Core & Build Dependencies (1.6 & 1.7)
-        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        run: |
-          if [ "${{ github.event.repository.name }}" != "RimWorld-RimMind-Mod-Core" ] && [ "${{ github.event.repository.name }}" != "RimMind-Core" ] && [ ! -d "../RimMind-Core" ]; then
-            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Core.git ../RimMind-Core
-            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.6
-            dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion=1.7
-          fi
-          if ( [ "${{ github.event.repository.name }}" = "RimWorld-RimMind-Mod-Advisor" ] || [ "${{ github.event.repository.name }}" = "RimMind-Advisor" ] ) && [ ! -d "../RimMind-Actions" ]; then
-            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Actions.git ../RimMind-Actions
-            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.6
-            dotnet build ../RimMind-Actions/Source/RimMindActions.csproj -c Release -p:GameVersion=1.7
-          fi
-
-      - name: Restore dependencies
-        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        run: dotnet restore ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }}
-
-      - name: Build ArchTests
-        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        run: dotnet build ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-restore -c Release
-
-      - name: Run ArchTests Phase ${{ matrix.phase }}
-        if: steps.phase-check.outputs.enabled == 'true' && steps.check_arch.outputs.has_arch == 'true'
-        run: |
-          FILTER=""
-          case "${{ matrix.phase }}" in
-            A) FILTER="Phase=A|Phase=General" ;;
-            B) FILTER="Phase=A|Phase=B|Phase=General" ;;
-            C) FILTER="Phase=A|Phase=B|Phase=C|Phase=General" ;;
-            D) FILTER="Phase=A|Phase=B|Phase=C|Phase=D|Phase=General" ;;
-            E) FILTER="Phase=A|Phase=B|Phase=C|Phase=D|Phase=E|Phase=General" ;;
-            Full) FILTER="" ;;
-          esac
-          if [ -n "$FILTER" ]; then
-            dotnet test ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-build -c Release --filter "$FILTER" --verbosity normal
-          else
-            dotnet test ${{ inputs.arch-test-dir }}/${{ steps.check_arch.outputs.csproj }} --no-build -c Release --verbosity normal
-          fi
+      - name: Run Architecture Tests
+        if: steps.check_tests.outputs.has_arch == 'true'
+        run: dotnet test ${{ inputs.arch-test-dir }}/${{ steps.check_tests.outputs.arch_csproj }} -c Release --verbosity normal
