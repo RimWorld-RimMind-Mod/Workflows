@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    name: Validate Workflows and Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install PyYAML
+        run: python3 -m pip install --upgrade pip pyyaml
+      - name: Parse workflows, check invariants, and verify script syntax
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import py_compile
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          import yaml
+
+          root = Path(".")
+          errors: list[str] = []
+
+          readme = root / "README.md"
+          if not readme.is_file() or not readme.read_text(encoding="utf-8").strip():
+              errors.append("Missing or empty README.md")
+
+          workflows_dir = root / ".github" / "workflows"
+          workflow_files = sorted(
+              list(workflows_dir.glob("*.yml")) + list(workflows_dir.glob("*.yaml"))
+          )
+          if not workflow_files:
+              errors.append("No workflow files found under .github/workflows/")
+
+          reusable_names = {
+              "ai-release-notes.yml",
+              "ai-release.yml",
+              "package-mod.yml",
+              "release.yml",
+              "test.yml",
+          }
+
+          allowed_actions = {
+              "actions/checkout": "v7",
+              "actions/setup-python": "v7",
+              "actions/setup-dotnet": "v6",
+              "actions/upload-artifact": "v7",
+              "actions/download-artifact": "v8",
+              "actions/github-script": "v9",
+              "softprops/action-gh-release": "v3",
+          }
+
+          def check_uses(node: object, rel: str) -> None:
+              if isinstance(node, dict):
+                  uses = node.get("uses")
+                  if isinstance(uses, str) and "@" in uses and not uses.startswith("./"):
+                      action, ref = uses.split("@", 1)
+                      expected = allowed_actions.get(action)
+                      if expected and ref != expected:
+                          errors.append(f"{rel}: expected {action}@{expected}, found @{ref}")
+                  for v in node.values():
+                      check_uses(v, rel)
+              elif isinstance(node, list):
+                  for item in node:
+                      check_uses(item, rel)
+
+          for wf in workflow_files:
+              rel = wf.relative_to(root).as_posix()
+              try:
+                  data = yaml.safe_load(wf.read_text(encoding="utf-8"))
+              except yaml.YAMLError as exc:
+                  errors.append(f"{rel}: YAML parse error: {exc}")
+                  continue
+              if not isinstance(data, dict):
+                  errors.append(f"{rel}: workflow root must be a mapping")
+                  continue
+              if not isinstance(data.get("name"), str) or not data["name"].strip():
+                  errors.append(f"{rel}: missing workflow 'name'")
+
+              triggers = data.get("on") if "on" in data else data.get(True)
+              if isinstance(triggers, list):
+                  trigger_keys = set(triggers)
+              elif isinstance(triggers, dict):
+                  trigger_keys = set(triggers.keys())
+              elif isinstance(triggers, str):
+                  trigger_keys = {triggers}
+              else:
+                  trigger_keys = set()
+
+              if not trigger_keys:
+                  errors.append(f"{rel}: missing workflow 'on' triggers")
+              elif wf.name in reusable_names and "workflow_call" not in trigger_keys:
+                  errors.append(f"{rel}: reusable workflow must declare 'workflow_call'")
+              elif wf.name == "ci.yml" and not {"push", "pull_request", "workflow_dispatch"}.issubset(trigger_keys):
+                  errors.append(f"{rel}: ci.yml must declare push, pull_request, workflow_dispatch")
+
+              jobs = data.get("jobs")
+              if not isinstance(jobs, dict) or not jobs:
+                  errors.append(f"{rel}: missing or empty 'jobs'")
+              else:
+                  for job_id, job in jobs.items():
+                      if not isinstance(job, dict):
+                          errors.append(f"{rel}: job {job_id!r} must be a mapping")
+                          continue
+                      if "uses" not in job and not (
+                          isinstance(job.get("steps"), list) and job["steps"]
+                      ):
+                          errors.append(f"{rel}: job {job_id!r} must define 'steps' or 'uses'")
+
+              check_uses(data, rel)
+
+          dep_path = root / ".github" / "dependabot.yml"
+          if not dep_path.is_file():
+              errors.append("Missing .github/dependabot.yml")
+          else:
+              try:
+                  dep = yaml.safe_load(dep_path.read_text(encoding="utf-8"))
+                  if not isinstance(dep, dict) or dep.get("version") != 2:
+                      errors.append(".github/dependabot.yml: version must be 2")
+                  updates = dep.get("updates") if isinstance(dep, dict) else None
+                  if not isinstance(updates, list) or not updates:
+                      errors.append(".github/dependabot.yml: updates must be non-empty list")
+              except yaml.YAMLError as exc:
+                  errors.append(f".github/dependabot.yml: YAML parse error: {exc}")
+
+          scripts_dir = root / "scripts"
+          py_count = 0
+          sh_count = 0
+          if scripts_dir.is_dir():
+              for p in sorted(scripts_dir.rglob("*")):
+                  if not p.is_file():
+                      continue
+                  rel = p.relative_to(root).as_posix()
+                  text = p.read_text(encoding="utf-8", errors="replace")
+                  first = text.splitlines()[0] if text else ""
+                  if p.suffix.lower() == ".py" or (first.startswith("#!") and "python" in first):
+                      py_count += 1
+                      try:
+                          py_compile.compile(str(p), doraise=True)
+                      except py_compile.PyCompileError as exc:
+                          errors.append(f"{rel}: py_compile error: {exc}")
+                  elif p.suffix.lower() == ".sh" or (first.startswith("#!") and ("bash" in first or "/sh" in first)):
+                      sh_count += 1
+                      proc = subprocess.run(["bash", "-n", str(p)], capture_output=True, text=True)
+                      if proc.returncode != 0:
+                          errors.append(f"{rel}: bash -n error: {proc.stderr.strip()}")
+
+          if errors:
+              for err in errors:
+                  print(f"FAIL: {err}", file=sys.stderr)
+              sys.exit(1)
+
+          print(
+              f"PASS: workflows={len(workflow_files)} scripts_py={py_count} scripts_sh={sh_count}"
+          )
+          PY
