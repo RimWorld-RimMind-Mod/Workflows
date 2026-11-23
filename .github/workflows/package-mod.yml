@@ -4,9 +4,14 @@ on:
   workflow_call:
     inputs:
       tag-name:
-        description: 'The tag for naming the package (e.g. v1.2.3)'
+        description: 'The tag for naming the package (e.g. v2.0.0)'
         required: true
         type: string
+      dotnet-version:
+        description: '.NET SDK version for compiling RimWorld 1.6 & 1.7 assemblies'
+        required: false
+        type: string
+        default: '10.0.x'
       exclude-patterns:
         description: 'Additional rsync exclude patterns (space-separated)'
         required: false
@@ -33,41 +38,114 @@ jobs:
       - name: Checkout Caller Repo
         uses: actions/checkout@v7
 
+      - name: Normalize Workspace Directory Alias
+        run: |
+          MOD_SHORT=$(echo "${{ github.event.repository.name }}" | sed 's/^RimWorld-RimMind-Mod-/RimMind-/')
+          if [ ! -e "../$MOD_SHORT" ]; then
+            ln -s "$GITHUB_WORKSPACE" "../$MOD_SHORT"
+          fi
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+
+      - name: Build Mod Assemblies (1.6 & 1.7)
+        run: |
+          REPO_NAME="${{ github.event.repository.name }}"
+          IS_CORE=false
+          if [ "$REPO_NAME" = "RimWorld-RimMind-Mod-Core" ] || [ "$REPO_NAME" = "RimMind-Core" ]; then
+            IS_CORE=true
+          fi
+
+          if [ "$IS_CORE" = false ] && [ ! -d "../RimMind-Core" ]; then
+            git clone --depth 1 https://github.com/RimWorld-RimMind-Mod/RimWorld-RimMind-Mod-Core.git ../RimMind-Core
+            for ver in 1.6 1.7; do
+              dotnet build ../RimMind-Core/Source/Domain/RimMindCore.Domain.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+              dotnet build ../RimMind-Core/Source/Application/RimMindCore.Application.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+              dotnet build ../RimMind-Core/Source/RimMindCore.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+            done
+          fi
+
+          if [ "$IS_CORE" = true ]; then
+            for ver in 1.6 1.7; do
+              dotnet build Source/Domain/RimMindCore.Domain.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+              dotnet build Source/Application/RimMindCore.Application.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+              dotnet build Source/RimMindCore.csproj -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+            done
+          else
+            src_csproj=$(find Source -maxdepth 1 -name '*.csproj' -print -quit 2>/dev/null || true)
+            if [ -n "$src_csproj" ]; then
+              for ver in 1.6 1.7; do
+                dotnet build "$src_csproj" -c Release -p:GameVersion="$ver" -p:SkipDeployToModsFolder=true --nologo
+              done
+            fi
+          fi
+
       - name: Package Mod
         id: package
         run: |
           TAG="${{ inputs.tag-name }}"
+          REPO_NAME="${{ github.event.repository.name }}"
           if [ -f "About/About.xml" ]; then
             MOD_NAME=$(grep -oP '(?<=<name>)[^<]+' About/About.xml | head -1)
             MOD_SAFE=$(echo "$MOD_NAME" | sed 's/[^a-zA-Z0-9 ]//g' | sed 's/ /-/g' | sed 's/-\+/-/g')
           else
-            MOD_SAFE="${{ github.event.repository.name }}"
+            MOD_SAFE="$REPO_NAME"
           fi
           [ -z "$MOD_SAFE" ] && MOD_SAFE="mod"
           echo "mod_safe=$MOD_SAFE" >> $GITHUB_OUTPUT
-          EXTRA_EXCLUDES=""
+
+          EXTRA_EXCLUDES=()
+          if [ "$REPO_NAME" != "RimWorld-RimMind-Mod-Core" ] && [ "$REPO_NAME" != "RimMind-Core" ]; then
+            EXTRA_EXCLUDES+=(
+              --exclude='0_RimMindDomain.*'
+              --exclude='1_RimMindApplication.*'
+              --exclude='2_RimMindCore.*'
+              --exclude='Newtonsoft.Json.*'
+            )
+          fi
           if [ -n "${{ inputs.exclude-patterns }}" ]; then
             for pattern in ${{ inputs.exclude-patterns }}; do
-              EXTRA_EXCLUDES="$EXTRA_EXCLUDES --exclude='$pattern'"
+              EXTRA_EXCLUDES+=(--exclude="$pattern")
             done
           fi
+
           mkdir -p "/tmp/${MOD_SAFE}"
           rsync -av --delete \
             --exclude='.git/' \
             --exclude='.github/' \
-            --exclude='Source/' \
-            --exclude='Tests/' \
             --exclude='.claude/' \
             --exclude='.trae/' \
+            --exclude='.shared-workflows/' \
+            --exclude='Source/' \
+            --exclude='Tests/' \
+            --exclude='ArchTests/' \
+            --exclude='IntegrationTests/' \
+            --exclude='TestSupport/' \
+            --exclude='obj/' \
+            --exclude='bin/' \
             --exclude='docs/' \
+            --exclude='script/' \
             --exclude='*.csproj' \
             --exclude='*.sln' \
+            --exclude='*.user' \
             --exclude='.gitignore' \
+            --exclude='.git' \
             --exclude='.gitattributes' \
+            --exclude='.coderabbit.yaml' \
+            --exclude='.pre-commit-config.yaml' \
+            --exclude='AGENTS.md' \
+            --exclude='CLAUDE.md' \
+            --exclude='Directory.Build.props' \
+            --exclude='Directory.Build.targets' \
+            --exclude='INTRODUCTION.txt' \
+            --exclude='*.deps.json' \
+            --exclude='*.pdb' \
             --exclude='*.md' \
-            --exclude='.shared-workflows/' \
-            $EXTRA_EXCLUDES \
+            "${EXTRA_EXCLUDES[@]}" \
             "./" "/tmp/${MOD_SAFE}/"
+
           cd /tmp
           zip -r "${MOD_SAFE}-${TAG}.zip" "${MOD_SAFE}/"
           echo "::notice::打包完成: ${MOD_SAFE}-${TAG}.zip"
